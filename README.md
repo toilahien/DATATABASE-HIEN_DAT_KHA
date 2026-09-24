@@ -79,19 +79,6 @@ A key rule — **a property can have at most one active lease at any given time*
 | **Owner** | Monitors property status, contract history, maintenance events, payouts/revenue |
 | **Tenant / Buyer** | Searches properties, books viewings, signs leases, makes payments, submits maintenance requests |
 
-## Functional Requirements
-
-| # | Requirement |
-|---|---|
-| FR1 | Admin/Property Manager can create, update, and manage property records (type, location, ownership, listing type, status). |
-| FR2 | Admin/Property Manager can assign Agents to specific properties. |
-| FR3 | Agent can create/manage listings and viewings only for assigned properties. |
-| FR4 | System records every viewing (date, time, status) and prevents overlapping confirmed viewings for the same Agent. |
-| FR5 | System manages leases (start/end date, rent, deposit, status) and enforces at most one active lease per property. |
-| FR6 | System automatically generates recurring rental payment records per the lease payment schedule. |
-| FR7 | System records maintenance requests linked to a lease and updates property status accordingly. |
-| FR8 | System supports reporting: occupancy rate, cash flow, agent performance, leases nearing expiration, overdue payments. |
-
 ## Non-Functional Requirements
 
 - **Security** — tenant/owner contact information access-restricted by actor role
