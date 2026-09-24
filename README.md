@@ -166,6 +166,18 @@ erDiagram
     PERSON ||--o| OWNER : ISA
     PERSON ||--o| TENANT : ISA
     PERSON ||--o| AGENT : ISA
+    OWNER ||--o{ PROPERTY : owns
+    AGENT ||--o{ PROPERTY : manages
+    PROPERTY ||--|| RESIDENTIAL_PROPERTY : ISA
+    PROPERTY ||--|| COMMERCIAL_PROPERTY : ISA
+    PROPERTY ||--o{ PROPERTY_IMAGE : has
+    PROPERTY ||--o{ VIEWING : has
+    TENANT ||--o{ VIEWING : books
+    AGENT ||--o{ VIEWING : handles
+    PROPERTY ||--o{ LEASE : leased_via
+    TENANT ||--o{ LEASE : signs
+    LEASE ||--o{ PAYMENT : has
+    LEASE ||--o{ MAINTENANCE_REQUEST : submits
 
     PERSON {
         int PersonID PK
@@ -174,49 +186,41 @@ erDiagram
         varchar Email
     }
     OWNER {
-        int PersonID PK_FK
+        int PersonID PK "FK -> PERSON"
         varchar Address
     }
     TENANT {
-        int PersonID PK_FK
+        int PersonID PK "FK -> PERSON"
         varchar IDCardNumber
     }
     AGENT {
-        int PersonID PK_FK
+        int PersonID PK "FK -> PERSON"
         decimal CommissionRate
     }
-
-    OWNER ||--o{ PROPERTY : owns
-    AGENT ||--o{ PROPERTY : manages
-    PROPERTY ||--|| RESIDENTIAL_PROPERTY : ISA
-    PROPERTY ||--|| COMMERCIAL_PROPERTY : ISA
-
     PROPERTY {
         int PropertyID PK
         varchar Title
         varchar Address
         varchar PropertyType
-        varchar ListingType "FOR_SALE / FOR_RENT"
+        varchar ListingType
         decimal Price
         varchar Status
         int OwnerID FK
         int AgentID FK
     }
     RESIDENTIAL_PROPERTY {
-        int PropertyID PK_FK
+        int PropertyID PK "FK -> PROPERTY"
         int Bedrooms
         int Bathrooms
         decimal Area
         varchar FurnishedStatus
     }
     COMMERCIAL_PROPERTY {
-        int PropertyID PK_FK
+        int PropertyID PK "FK -> PROPERTY"
         varchar BusinessType
         decimal FloorArea
         int ParkingSpaces
     }
-
-    PROPERTY ||--o{ PROPERTY_IMAGE : has
     PROPERTY_IMAGE {
         int ImageID PK
         varchar ImageURL
@@ -225,10 +229,6 @@ erDiagram
         date UploadedDate
         int PropertyID FK
     }
-
-    PROPERTY ||--o{ VIEWING : has
-    TENANT ||--o{ VIEWING : books
-    AGENT ||--o{ VIEWING : handles
     VIEWING {
         int ViewingID PK
         date ViewingDate
@@ -239,9 +239,6 @@ erDiagram
         int TenantID FK
         int AgentID FK
     }
-
-    PROPERTY ||--o{ LEASE : "leased via"
-    TENANT ||--o{ LEASE : signs
     LEASE {
         int LeaseID PK
         date StartDate
@@ -252,8 +249,6 @@ erDiagram
         int PropertyID FK
         int TenantID FK
     }
-
-    LEASE ||--o{ PAYMENT : has
     PAYMENT {
         int PaymentID PK
         date PaymentDate
@@ -262,8 +257,6 @@ erDiagram
         varchar PaymentMethod
         int LeaseID FK
     }
-
-    LEASE ||--o{ MAINTENANCE_REQUEST : submits
     MAINTENANCE_REQUEST {
         int RequestID PK
         text Description
