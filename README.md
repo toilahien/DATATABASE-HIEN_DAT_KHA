@@ -10,7 +10,6 @@
 - [Project Objective](#project-objective)
 - [Project Scope](#project-scope)
 - [Actors](#actors)
-- [Functional Requirements](#functional-requirements)
 - [Non-Functional Requirements](#non-functional-requirements)
 - [Business Rules](#business-rules)
 - [Database Design](#database-design)
@@ -190,10 +189,10 @@ All 12 relations are verified against **1NF, 2NF, 3NF, and BCNF**. Every relatio
 
 ```
 .
-├── README.md
-├── Real Estate Rental Ledger - Full Report.docx   # Full report: scope, requirements, business rules,
-│                                                   # EER diagram, data dictionary, logical schema, normalization
-└── Project progress report.docx                   # Progress tracking document
+├── DB_Project_Report.docx
+├── EER Diagram.png
+│                                                   
+└── README.md                  # Full report: scope, requirements, business rules,
 ```
 
 ## Standards Referenced
