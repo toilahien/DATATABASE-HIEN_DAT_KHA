@@ -1,194 +1,193 @@
-# Real Estate Property & Rental Ledger System (REIMS)
+Overview
 
-Database Project Report — centralized relational database and management platform for small and medium-sized real estate brokerages / property management agencies.
+The Real Estate Property & Rental Ledger System (REIMS) is designed to provide centralized management for small and medium-sized real estate brokerages and property management agencies.
 
-## Team
+Agencies operate a portfolio of properties that are owned by different clients, managed by different agents, and rented to different tenants. Property status, viewing schedules, lease contracts, and rental payments must stay consistent at all times.
 
-| Field | Detail |
-|---|---|
-| **Team Name** | Hiền, Đạt, Kha |
-| **Team Members** | Lại Thu Hiền · Lê Tuấn Kha · Nguyễn Thành Đạt |
-| **Project Title** | Real Estate Property & Rental Ledger |
+In many cases, property records, viewing schedules, and rental payments are still managed manually using paper records or spreadsheets. This creates several problems:
 
-## Problem Statement
+Difficulty synchronizing property status, resulting in double bookings and conflicting transactions.
+Difficulty tracing the complete financial and maintenance history of a property across multiple leases.
+Lack of mandatory checks to ensure a property is never leased while unavailable or under maintenance.
+Insufficient links between properties, owners, agents, tenants, leases, and rental payments.
 
-Small and medium-sized real estate brokerages and property management agencies that still rely on manual methods (physical records, spreadsheets, disconnected communication channels) face recurring operational problems: unsynchronized property statuses causing double bookings and conflicting transactions, scattered customer data, manual calculation errors in rent/commissions, and no automated alerts for expiring contracts or overdue payments.
+The project addresses these problems by designing a relational database that integrates property inventory, ownership, agent allocation, viewings, leases, rental payments, and maintenance requests into one system.
 
-**REIMS** addresses these problems through a centralized relational database covering property inventory, customer relationships, listings, viewings, leases, rental payments, maintenance requests, and financial information.
+Project Objective
 
-## Core Capabilities
+The objective of this project is to design and build a relational database named Real Estate Property & Rental Ledger for the centralized management of:
 
-- **Property Inventory Digitization & Synchronization** — centralized, real-time property status to prevent conflicting transactions
-- **Centralized Customer Relationship Management (CRM)** — customer profiles, viewing schedules, consultation history
-- **Contract & Financial Automation** — lease management, recurring billing, commission calculation, expiry/overdue notifications
-- **Operational Data Visualization** — dashboards for occupancy, cash flow, property status, agent performance
+Property inventory (residential and commercial)
+Owners, agents, and tenants
+Property viewings
+Lease contracts
+Rental payments
+Maintenance requests
 
-## Actors
+A key objective is to ensure that a property can have at most one active lease at any given time, and that property status is automatically synchronized whenever a lease becomes active, ends, or is terminated.
 
-| Actor | Responsibilities |
-|---|---|
-| **Admin / Property Manager** | Manages property portfolio, agent allocation, approves contracts, controls financial ledger |
-| **Agent (Broker / Operations)** | Manages assigned listings, coordinates viewings, prepares lease agreements, records maintenance requests |
-| **Owner** | Monitors property status, contract history, maintenance events, payouts/revenue |
-| **Tenant / Buyer** | Searches properties, books viewings, signs leases, makes payments, submits maintenance requests |
+This rule will be enforced directly at the database layer using an SQL Trigger.
 
-## Database Design (ISO/IEC 19505 / IE Standards)
+Project Scope
+In Scope
 
-### Conceptual Model (EER Diagram)
+The system includes the management of:
 
-```mermaid
-erDiagram
-    PERSON ||--o| OWNER : ISA
-    PERSON ||--o| TENANT : ISA
-    PERSON ||--o| AGENT : ISA
+Persons (Owners, Tenants, Agents)
+Properties (Residential, Commercial)
+Property images
+Property viewings
+Lease contracts
+Rental payments
+Maintenance requests
+Out of Scope
 
-    PERSON {
-        int PersonID PK
-        varchar FullName
-        varchar Phone
-        varchar Email
-    }
-    OWNER {
-        int PersonID PK_FK
-        varchar Address
-    }
-    TENANT {
-        int PersonID PK_FK
-        varchar IDCardNumber
-    }
-    AGENT {
-        int PersonID PK_FK
-        decimal CommissionRate
-    }
+The following systems are not included:
 
-    OWNER ||--o{ PROPERTY : owns
-    AGENT ||--o{ PROPERTY : manages
-    PROPERTY ||--|| RESIDENTIAL_PROPERTY : ISA
-    PROPERTY ||--|| COMMERCIAL_PROPERTY : ISA
+Full accounting / general ledger for the brokerage company itself
+Property sale conveyancing and legal title transfer processes
+Marketing / lead-generation campaign automation
+Human resources management of agency staff
+Functional Requirements
 
-    PROPERTY {
-        int PropertyID PK
-        varchar Title
-        varchar Address
-        varchar PropertyType
-        varchar ListingType "FOR_SALE / FOR_RENT"
-        decimal Price
-        varchar Status
-        int OwnerID FK
-        int AgentID FK
-    }
-    RESIDENTIAL_PROPERTY {
-        int PropertyID PK_FK
-        int Bedrooms
-        int Bathrooms
-        decimal Area
-        varchar FurnishedStatus
-    }
-    COMMERCIAL_PROPERTY {
-        int PropertyID PK_FK
-        varchar BusinessType
-        decimal FloorArea
-        int ParkingSpaces
-    }
+The system must support the following functions:
 
-    PROPERTY ||--o{ PROPERTY_IMAGE : has
-    PROPERTY_IMAGE {
-        int ImageID PK
-        varchar ImageURL
-        varchar Caption
-        boolean IsPrimary
-        date UploadedDate
-        int PropertyID FK
-    }
+FR1: An Admin/Property Manager can create, update, and manage property records, including type, location, ownership, listing type, and status.
+FR2: An Admin/Property Manager can assign Agents responsible for specific properties.
+FR3: An Agent can create and manage listings and viewings only for properties currently assigned to that Agent.
+FR4: The system records every property viewing, including date, time, and status, and prevents overlapping confirmed viewings for the same Agent.
+FR5: The system manages lease contracts, including start date, end date, rent, deposit, and status, and enforces at most one active lease per property.
+FR6: The system automatically generates recurring rental payment records according to the lease payment schedule and tracks payment status.
+FR7: The system records maintenance requests linked to a lease and updates property status accordingly.
+FR8: The system supports reporting queries such as: property occupancy rate, cash flow by period, agent performance, leases nearing expiration, overdue payments.
+Non-Functional Requirements
+Security: Tenant and owner identification/contact information must have restricted access according to actor role.
+Performance: Occupancy and cash-flow dashboard queries should return results promptly even as rental payment history grows.
+Availability: The system should be available 24/7 so agents and tenants can check property status or book viewings at any time.
+Data Integrity: Lease activation and property-status synchronization must be enforced at the database layer and must not rely entirely on application logic.
+Business Rules
+Property & Owner
+BR-01: Each property is uniquely identified by a property_id and must be associated with exactly one Owner. An Owner may own multiple properties.
+BR-02: Each property must be classified as either FOR_SALE or FOR_RENT when listed. A property cannot be simultaneously listed for both purposes.
+BR-03: The property status must be constrained to AVAILABLE, LEASED, or UNDER_MAINTENANCE.
+BR-04: A property can only be leased when its status is AVAILABLE. Once a lease becomes active, the property status must change to LEASED.
+BR-05: A property with status UNDER_MAINTENANCE cannot be leased until the maintenance request has been completed.
+Agent Allocation & Property Listing
+BR-06: An Agent may manage multiple properties; a property may be assigned to one or more Agents over time.
+BR-07: An Agent may only create or manage listings for properties currently assigned to that Agent.
+BR-08: Each listing must contain property type, location, and applicable price.
+BR-09: A property cannot have more than one conflicting active listing for the same transaction purpose.
+Customer & Property Viewing
+BR-10: Each Tenant is uniquely identified and must have at least one contact method.
+BR-11: A Tenant may book multiple viewings; each viewing belongs to exactly one Tenant, one Property, and one Agent.
+BR-12: A viewing can only be confirmed for a property whose status is AVAILABLE.
+BR-13: A confirmed viewing cannot overlap with another confirmed viewing assigned to the same Agent.
+Lease Management
+BR-14: Each lease must reference exactly one Property and one Tenant.
+BR-15: A property may have multiple lease records over its lifetime, but at most one active lease at any given time.
+BR-16: MonthlyRent > 0 and EndDate > StartDate.
+BR-17: A lease becomes active only after approval and the property is AVAILABLE.
+BR-18: When a lease ends or is terminated, property status reverts from LEASED to AVAILABLE, unless placed under maintenance.
+Rental Ledger & Financial History
+BR-19: Each active lease may generate multiple rental payment records; each payment references exactly one lease.
+BR-20: Amount > 0 for every payment.
+BR-21: Payment records tied to completed/terminated leases must be retained — never hard-deleted.
+BR-22: The ledger preserves complete financial history across multiple leases per property.
+Maintenance Management
+BR-23: A maintenance request must reference exactly one Lease and record description, report date, and status.
+BR-24: When a property enters maintenance, status changes to UNDER_MAINTENANCE; it returns to AVAILABLE once completed, if no active lease exists.
+Conceptual Database Design
 
-    PROPERTY ||--o{ VIEWING : has
-    TENANT ||--o{ VIEWING : books
-    AGENT ||--o{ VIEWING : handles
-    VIEWING {
-        int ViewingID PK
-        date ViewingDate
-        time ViewingTime
-        varchar Status
-        text Notes
-        int PropertyID FK
-        int TenantID FK
-        int AgentID FK
-    }
+The conceptual model contains the following main entities:
 
-    PROPERTY ||--o{ LEASE : "leased via"
-    TENANT ||--o{ LEASE : signs
-    LEASE {
-        int LeaseID PK
-        date StartDate
-        date EndDate
-        decimal MonthlyRent
-        decimal DepositAmount
-        varchar Status
-        int PropertyID FK
-        int TenantID FK
-    }
+PERSON
+OWNER
+TENANT
+AGENT
+PROPERTY
+RESIDENTIAL_PROPERTY
+COMMERCIAL_PROPERTY
+PROPERTY_IMAGE
+VIEWING
+LEASE
+PAYMENT
+MAINTENANCE_REQUEST
 
-    LEASE ||--o{ PAYMENT : has
-    PAYMENT {
-        int PaymentID PK
-        date PaymentDate
-        decimal Amount
-        varchar PaymentType
-        varchar PaymentMethod
-        int LeaseID FK
-    }
+The EER design includes two specialization hierarchies:
 
-    LEASE ||--o{ MAINTENANCE_REQUEST : submits
-    MAINTENANCE_REQUEST {
-        int RequestID PK
-        text Description
-        date ReportDate
-        decimal EstimatedCost
-        decimal ActualCost
-        varchar Status
-        int LeaseID FK
-    }
-```
+PERSON
+   |
+   +-- OWNER
+   |
+   +-- TENANT
+   |
+   +-- AGENT
+Overlapping: a person may simultaneously be an Owner, a Tenant, and/or an Agent.
+Partial: a person may belong to none of the three subtypes.
+PROPERTY
+   |
+   +-- RESIDENTIAL_PROPERTY
+   |
+   +-- COMMERCIAL_PROPERTY
+Disjoint: a property cannot be both residential and commercial.
+Total: every property must belong to exactly one subtype.
+Entity Overview
+Entity	Primary Key	Purpose
+PERSON	PersonID	Common supertype for any individual in the system.
+OWNER	PersonID	Owner subtype; owns one or more properties.
+TENANT	PersonID	Tenant subtype; books viewings and signs leases.
+AGENT	PersonID	Agent subtype; manages properties, viewings, and leases.
+PROPERTY	PropertyID	Core property inventory record.
+RESIDENTIAL_PROPERTY	PropertyID	Subtype; residential-specific attributes.
+COMMERCIAL_PROPERTY	PropertyID	Subtype; commercial-specific attributes.
+PROPERTY_IMAGE	ImageID	Photos associated with a property.
+VIEWING	ViewingID	Scheduled property viewing between a Tenant and an Agent.
+LEASE	LeaseID	Rental lease contract for a property.
+PAYMENT	PaymentID	Rental ledger transaction tied to a lease.
+MAINTENANCE_REQUEST	RequestID	Maintenance/repair tracking tied to a lease.
+Relationship Summary
+Relationship	Cardinality	Related Business Rule
+OWNER — PROPERTY	1,1 – 0,N	BR-01
+AGENT — PROPERTY	1,1 – 0,N	BR-06
+PROPERTY — PROPERTY_IMAGE	1,1 – 0,N	—
+PROPERTY — VIEWING	1,1 – 0,N	BR-12
+TENANT — VIEWING	1,1 – 0,N	BR-11
+AGENT — VIEWING	1,1 – 0,N	BR-11, BR-13
+PROPERTY — LEASE	1,1 – 0,N	BR-15
+TENANT — LEASE	1,1 – 0,N	BR-14
+LEASE — PAYMENT	1,1 – 0,N	BR-19
+LEASE — MAINTENANCE_REQUEST	1,1 – 0,N	BR-23
+PERSON — OWNER/TENANT/AGENT	Overlapping, partial specialization	—
+PROPERTY — RESIDENTIAL/COMMERCIAL	Disjoint, total specialization	—
+Design Assumptions
+A property has at most one active lease at any time (BR-15); lease history is preserved, not overwritten.
+PROPERTY.AgentID represents the currently assigned agent; historical agent reassignment is not tracked in Phase 1.
+Every payment must reference an existing lease (PAYMENT.LeaseID is mandatory); one-time fees unrelated to any lease are out of scope for Phase 1.
+Hazard-style tiered access is not applicable to this domain; instead, property Status acts as the primary state-gating attribute.
+Database Challenge
 
-### Entities Overview
+The main database challenge of this project is enforcing that a property never has more than one active lease at a time, and that property status stays synchronized whenever a lease's state changes.
 
-| # | Entity | Primary Key | Description |
-|---|---|---|---|
-| 1 | PERSON | PersonID | Supertype — basic identity of any person in the system |
-| 2 | OWNER | PersonID (FK) | Property owner |
-| 3 | TENANT | PersonID (FK) | Renter / lease signer |
-| 4 | AGENT | PersonID (FK) | Broker handling listings, viewings, leases |
-| 5 | PROPERTY | PropertyID | Property inventory record |
-| 6 | RESIDENTIAL_PROPERTY | PropertyID (FK) | Subtype — residential-specific attributes |
-| 7 | COMMERCIAL_PROPERTY | PropertyID (FK) | Subtype — commercial-specific attributes |
-| 8 | PROPERTY_IMAGE | ImageID | Property photos |
-| 9 | VIEWING | ViewingID | Scheduled property viewings |
-| 10 | LEASE | LeaseID | Rental lease contract |
-| 11 | PAYMENT | PaymentID | Rental ledger transactions |
-| 12 | MAINTENANCE_REQUEST | RequestID | Maintenance/repair tracking |
+Before inserting or activating a record in LEASE, the database must check:
 
-## Key Business Rules
+The referenced Property and Tenant exist.
+The Property's current status is AVAILABLE.
+No other LEASE record for the same PropertyID currently has Status = 'ACTIVE'.
 
-- **BR-01/02/03**: each property belongs to exactly one Owner; is listed as `FOR_SALE` or `FOR_RENT` (not both); status ∈ `{AVAILABLE, LEASED, UNDER_MAINTENANCE}`
-- **BR-15**: a property may have multiple leases over its lifetime, but **at most one active lease** at a time
-- **BR-16**: `EndDate > StartDate`, `MonthlyRent > 0`
-- **BR-21/22**: financial records are never hard-deleted — full rental history is preserved per property
-- **BR-24**: a property under maintenance cannot be leased
+The rule will be implemented using an SQL Trigger such as:
 
-Full list (BR-01 → BR-24) is documented in the project report.
+sql
+BEFORE INSERT OR UPDATE ON LEASE
 
-## Normalization
+The trigger will reject any attempt to activate a lease that would create a conflicting active lease for the same property, and will automatically update PROPERTY.Status to LEASED or AVAILABLE accordingly.
 
-All 12 relations are verified against **1NF, 2NF, 3NF, and BCNF** — see Section 2.4 of the report for the functional-dependency analysis.
+Team Members
 
-## Repository Contents
+Team: Hiền, Đạt, Kha
 
-| File | Description |
-|---|---|
-| `Real Estate Rental Ledger - Full Report.docx` | Full project report: scope, requirements, business rules, EER diagram, data dictionary, logical schema, normalization |
-| `Project progress report.docx` | Progress tracking document |
+Lại Thu Hiền
+Lê Tuấn Kha
+Nguyễn Thành Đạt
 
-## Standards Referenced
-
-- ISO/IEC 19505 (UML) / IE (Information Engineering) notation for conceptual modeling
-- Elmasri & Navathe — *Fundamentals of Database Systems* (EER notation, Chapter 4)
+Course: [Insert Course Code]
+Phase: Phase 1 – Conceptual Design
