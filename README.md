@@ -78,6 +78,47 @@ A key rule — **a property can have at most one active lease at any given time*
 | **Owner** | Monitors property status, contract history, maintenance events, payouts/revenue |
 | **Tenant** | The customer who rents a property through the system. A Tenant may sign a lease, make recurring rental payments, and submit maintenance requests during the tenancy|
 
+## Functional Requirements (Actor-Action-Data Format)
+
+### Admin / Property Manager
+
+1. The system must allow an Admin / Property Manager to create, update, and manage property records, including property type, location, ownership, listing purpose, and current status.
+2. The system must allow an Admin / Property Manager to assign and manage Agents responsible for specific properties.
+3. The system must allow an Admin / Property Manager to review and approve lease contracts.
+4. The system must allow an Admin / Property Manager to manage maintenance requests and update their processing status.
+5. The system must allow an Admin / Property Manager to manage and review financial ledger information, including rental payments, revenue, and related transactions.
+6. The system must provide an Admin / Property Manager with dashboards showing property occupancy, property status, cash flow, and agent sales performance.
+
+### Agent
+
+7. The system must allow an Agent to create and manage listings only for properties currently assigned to that Agent.
+8. The system must allow an Agent to publish rental listings containing the information required to offer a property, including property type, location, and applicable price.
+9. The system must allow an Agent to schedule and manage property viewings for customers.
+10. The system must allow an Agent to prepare and manage lease agreement information for assigned transactions.
+11. The system must allow an Agent to create and record maintenance requests submitted by tenants.
+
+### Owner
+
+12. The system must allow an Owner to view the current status of their properties.
+13. The system must allow an Owner to review property contract histories and maintenance events.
+14. The system must allow an Owner to review payouts and revenue information associated with their properties.
+
+### Tenant
+
+15. The system must allow a Tenant to search and view available rental properties.
+16. The system must allow a Tenant to book property viewings.
+17. The system must allow a Tenant to sign the applicable lease.
+18. The system must allow a Tenant to view rental payment information and make recurring rental payments.
+19. The system must allow a Tenant to submit maintenance requests for the rented property.
+
+### Automated System Functions
+
+20. The system must automatically synchronize property status when a lease becomes active, ends, or is terminated.
+21. The system must automatically generate recurring rental invoices or payment records according to the lease payment schedule.
+22. The system must automatically calculate applicable rental amounts and broker commissions based on the relevant transaction information.
+23. The system must automatically notify responsible users of expiring leases and overdue payments.
+24. The system must prevent conflicting active listings, overlapping confirmed viewings for the same Agent, and multiple active leases for the same property.
+
 ## Non-Functional Requirements
 
 - **Security** — tenant/owner contact information access-restricted by actor role
