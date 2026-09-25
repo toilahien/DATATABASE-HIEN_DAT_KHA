@@ -73,10 +73,10 @@ A key rule — **a property can have at most one active lease at any given time*
 
 | Actor | Responsibilities |
 |---|---|
-| **Admin / Property Manager** | Manages property portfolio, agent allocation, approves contracts, controls financial ledger |
-| **Agent (Broker / Operations)** | Manages assigned listings, coordinates viewings, prepares lease agreements, records maintenance requests |
+| **Admin** / Property Manager** | Manages property portfolio, agent allocation, approves contracts, controls financial ledger |
+| **Agent** (Broker / Operations)** | Manages assigned listings, coordinates viewings, prepares lease agreements, records maintenance requests |
 | **Owner** | Monitors property status, contract history, maintenance events, payouts/revenue |
-| **Tenant | The customer who rents a property through the system. A Tenant may sign a lease, make recurring rental payments, and submit maintenance requests during the tenancy|
+| **Tenant** | The customer who rents a property through the system. A Tenant may sign a lease, make recurring rental payments, and submit maintenance requests during the tenancy|
 
 ## Non-Functional Requirements
 
