@@ -298,7 +298,7 @@ def dashboard():
         cur.execute(f"""SELECT COALESCE(SUM(pay.amount),0) AS total FROM payment pay
                        JOIN lease l ON l.lease_id=pay.lease_id JOIN property p ON p.property_id=l.property_id
                        WHERE pay.status='POSTED' AND pay.payment_type<>'REFUND'
-                       AND pay.payment_date>=DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND {cash_scope}""", lease_args)
+                       AND pay.payment_date>=DATE_FORMAT(CURRENT_DATE,'%%Y-%%m-01') AND {cash_scope}""", lease_args)
         cash_this_month = cur.fetchone()["total"]
         cur.execute(f"""SELECT p.property_id,p.title,p.status,p.asking_price,p.listing_type
                        FROM property p WHERE {prop_where}
