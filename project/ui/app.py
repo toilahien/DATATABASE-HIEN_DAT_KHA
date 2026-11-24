@@ -149,8 +149,10 @@ def setup():
         confirm = request.form.get("confirm_password", "")
         if not valid_username(username):
             flash("Use 3–80 letters, numbers, dots, underscores, or hyphens for the username.", "error")
-        elif len(password) < 12:
-            flash("Use a password with at least 12 characters.", "error")
+        elif not password:
+            flash("Password is required.", "error")
+        elif len(password) > 128:
+            flash("Password cannot exceed 128 characters.", "error")
         elif password != confirm:
             flash("The passwords do not match.", "error")
         else:
@@ -202,8 +204,10 @@ def accounts():
         try:
             if not valid_username(username):
                 raise ValueError("Username must be 3–80 letters, numbers, dots, underscores, or hyphens.")
-            if len(password) < 12:
-                raise ValueError("Password must contain at least 12 characters.")
+            if not password:
+                raise ValueError("Password is required.")
+            if len(password) > 128:
+                raise ValueError("Password cannot exceed 128 characters.")
             if role not in {"ADMIN", "AGENT", "OWNER", "TENANT_BUYER"}:
                 raise ValueError("Choose a valid actor role.")
             person_id = int(person_raw) if person_raw else None
