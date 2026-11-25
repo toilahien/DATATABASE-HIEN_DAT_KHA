@@ -29,7 +29,7 @@
 | Field | Detail |
 |---|---|
 | **Team Name** | Hiền, Đạt, Kha |
-| **Team Members** | Lại Thu Hiền · Lê Tuấn Kha · Nguyễn Thành Đạt |
+| **Team Members** | Lại Thu Hiền · Nguyễn Thành Đạt |
 | **Project Title** | Real Estate Property & Rental Ledger |
 
 ## Problem Statement
