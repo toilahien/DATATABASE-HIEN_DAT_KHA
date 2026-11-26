@@ -4,7 +4,9 @@ import re
 import secrets
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 from functools import wraps
+from uuid import UUID, uuid4
 
 import pymysql
 from pymysql.cursors import DictCursor
@@ -51,6 +53,12 @@ def db_cursor():
         raise
     finally:
         conn.close()
+
+
+def call_procedure(cur, sql, params=()):
+    cur.execute(sql, params)
+    while cur.nextset():
+        pass
 
 
 def money(value):
@@ -299,18 +307,28 @@ def dashboard():
                        AND p.status='AVAILABLE' AND {prop_where}""", prop_args)
         sale_listings = cur.fetchone()["total"]
         cash_scope = lease_where
-        cur.execute(f"""SELECT COALESCE(SUM(pay.amount),0) AS total FROM payment pay
+        cur.execute(f"""SELECT COALESCE(SUM(CASE WHEN pay.payment_type='REFUND' THEN -pay.amount ELSE pay.amount END),0) AS total FROM payment pay
                        JOIN lease l ON l.lease_id=pay.lease_id JOIN property p ON p.property_id=l.property_id
-                       WHERE pay.status='POSTED' AND pay.payment_type<>'REFUND'
-                       AND pay.payment_date>=DATE_FORMAT(CURRENT_DATE,'%%Y-%%m-01') AND {cash_scope}""", lease_args)
+                       WHERE pay.status='POSTED'
+                       AND pay.payment_date>=DATE_SUB(CURRENT_DATE,INTERVAL DAYOFMONTH(CURRENT_DATE)-1 DAY)
+                       AND pay.payment_date<=CURRENT_DATE AND {cash_scope}""", lease_args)
         cash_this_month = cur.fetchone()["total"]
+        cur.execute("""SELECT COUNT(*) AS total,COALESCE(SUM(b.balance_due),0) AS balance_due
+                       FROM v_invoice_balance b JOIN lease l ON l.lease_id=b.lease_id
+                       WHERE b.invoice_status IN ('DUE','PARTIALLY_PAID','OVERDUE')
+                         AND (%s='ADMIN'
+                              OR (%s='OWNER' AND EXISTS (SELECT 1 FROM property p WHERE p.property_id=l.property_id AND p.owner_id=%s))
+                              OR (%s='AGENT' AND l.agent_id=%s)
+                              OR (%s='TENANT_BUYER' AND l.tenant_id=%s))""",
+                    (role,role,person_id,role,person_id,role,person_id))
+        invoice_summary = cur.fetchone()
         cur.execute(f"""SELECT p.property_id,p.title,p.status,p.asking_price,p.listing_type
                        FROM property p WHERE {prop_where}
                        ORDER BY p.created_at DESC,p.property_id DESC LIMIT 8""", prop_args)
         recent_properties = cur.fetchall()
     return render_template("dashboard.html", statuses=statuses, active_leases=active_leases,
                            sale_listings=sale_listings, cash_this_month=cash_this_month,
-                           recent_properties=recent_properties)
+                           invoice_summary=invoice_summary,recent_properties=recent_properties)
 
 
 @app.route("/properties")
@@ -328,7 +346,7 @@ def properties():
     if q:
         clauses.append("(p.title LIKE %s OR p.address LIKE %s)")
         params.extend([f"%{q}%", f"%{q}%"])
-    if status in {"AVAILABLE", "LEASED", "UNDER_MAINTENANCE"}:
+    if status in {"AVAILABLE", "LEASED", "UNDER_MAINTENANCE", "SOLD"}:
         clauses.append("p.status=%s"); params.append(status)
     where = " AND ".join(clauses) or "1=1"
     with db_cursor() as (_, cur):
@@ -519,24 +537,63 @@ def payments():
     if request.method == "POST":
         if role not in {"ADMIN", "TENANT_BUYER"}: abort(403)
         try:
-            lease_id, amount = int(request.form["lease_id"]), float(request.form["amount"])
+            lease_id, amount = int(request.form["lease_id"]), Decimal(request.form["amount"])
             pay_date = date.fromisoformat(request.form["payment_date"])
+            invoice_raw = request.form.get("invoice_id", "").strip()
+            invoice_id = int(invoice_raw) if invoice_raw else None
             payment_type, method = request.form.get("payment_type", "RENT"), request.form.get("payment_method") or None
+            reference_code = request.form.get("reference_code", "").strip() or None
+            idempotency_key = str(UUID(request.form.get("idempotency_key", "")))
             if amount <= 0: raise ValueError("Payment amount must be greater than zero.")
+            if pay_date > date.today(): raise ValueError("A posted payment cannot have a future date.")
             if payment_type not in {"RENT", "DEPOSIT", "FEE", "REFUND"}: raise ValueError("Select a valid payment type.")
             if role == "TENANT_BUYER" and payment_type == "REFUND":
                 raise ValueError("Only Admin can record a refund.")
+            if payment_type == "RENT" and invoice_id is None:
+                raise ValueError("Select the rental invoice this rent payment settles.")
+            if invoice_id is not None and payment_type not in {"RENT", "REFUND"}:
+                raise ValueError("Only rent payments or refunds can be linked to an invoice.")
             with db_cursor() as (_, cur):
                 query = "SELECT lease_id FROM lease WHERE lease_id=%s"
                 args = [lease_id]
                 if role == "TENANT_BUYER": query += " AND tenant_id=%s"; args.append(person_id)
                 cur.execute(query + " FOR UPDATE", args)
                 if not cur.fetchone(): raise ValueError("The selected lease was not found for this account.")
-                cur.execute("INSERT INTO payment(lease_id,payment_date,amount,payment_type,payment_method) VALUES(%s,%s,%s,%s,%s)",
-                            (lease_id,pay_date,amount,payment_type,method))
+                invoice_paid = 0
+                if invoice_id is not None:
+                    cur.execute("""SELECT amount_due,status FROM rental_invoice
+                                   WHERE invoice_id=%s AND lease_id=%s FOR UPDATE""", (invoice_id,lease_id))
+                    invoice = cur.fetchone()
+                    if not invoice or invoice["status"] != "ISSUED":
+                        raise ValueError("The selected invoice does not belong to this lease or is void.")
+                    cur.execute("""SELECT COALESCE(SUM(CASE WHEN payment_type='RENT' THEN amount
+                                                        WHEN payment_type='REFUND' THEN -amount ELSE 0 END),0) AS paid
+                                   FROM payment WHERE invoice_id=%s AND status='POSTED'""", (invoice_id,))
+                    invoice_paid = cur.fetchone()["paid"]
+                    balance = max(invoice["amount_due"]-invoice_paid,0)
+                    if payment_type == "RENT" and amount > balance:
+                        raise ValueError(f"Payment exceeds the invoice balance ({balance:,.0f} VND).")
+                    if payment_type == "REFUND" and amount > invoice_paid:
+                        raise ValueError("Refund exceeds the amount previously paid on this invoice.")
+                cur.execute("""SELECT payment_id FROM payment
+                               WHERE lease_id=%s AND invoice_id <=> %s AND payment_date=%s AND amount=%s
+                                 AND payment_type=%s AND payment_method <=> %s AND reference_code <=> %s
+                                 AND status='POSTED' LIMIT 1""",
+                            (lease_id,invoice_id,pay_date,amount,payment_type,method,reference_code))
+                if cur.fetchone():
+                    raise ValueError("An identical payment is already recorded. Check the transaction reference before retrying.")
+                cur.execute("""INSERT INTO payment(lease_id,invoice_id,payment_date,amount,payment_type,
+                                                   payment_method,reference_code,idempotency_key)
+                               VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (lease_id,invoice_id,pay_date,amount,payment_type,method,reference_code,idempotency_key))
             flash("Payment recorded.", "success")
         except (ValueError, KeyError, TypeError) as exc:
             flash(str(exc), "error")
+        except pymysql.err.IntegrityError as exc:
+            if exc.args and exc.args[0] == 1062:
+                flash("This payment or transaction reference was already recorded.", "error")
+            else:
+                flash(f"Could not record payment: {exc}", "error")
         except Exception as exc:
             flash(f"Could not record payment: {exc}", "error")
         return redirect(url_for("payments"))
@@ -550,14 +607,168 @@ def payments():
                        JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
                        WHERE {where} ORDER BY (l.status='ACTIVE') DESC,l.lease_id DESC LIMIT 500""", args)
         leases = cur.fetchall()
+        invoice_where, invoice_args = "b.balance_due>0 AND b.status='ISSUED'", []
+        if role == "TENANT_BUYER": invoice_where += " AND l.tenant_id=%s"; invoice_args.append(person_id)
+        elif role == "OWNER": invoice_where += " AND p.owner_id=%s"; invoice_args.append(person_id)
+        cur.execute(f"""SELECT b.invoice_id,b.lease_id,b.period_start,b.period_end,b.due_date,
+                              b.amount_due,b.balance_due,b.invoice_status,p.title,tp.full_name AS tenant_name
+                       FROM v_invoice_balance b JOIN lease l ON l.lease_id=b.lease_id
+                       JOIN property p ON p.property_id=l.property_id
+                       JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
+                       WHERE {invoice_where} ORDER BY b.due_date,b.invoice_id LIMIT 500""", invoice_args)
+        invoices = cur.fetchall()
         cur.execute(f"""SELECT pay.payment_id,pay.payment_date,pay.amount,pay.payment_type,pay.payment_method,
-                              pay.status,pay.lease_id,p.title,tp.full_name AS tenant_name
+                              pay.status,pay.lease_id,pay.invoice_id,pay.reference_code,p.title,tp.full_name AS tenant_name
                        FROM payment pay JOIN lease l ON l.lease_id=pay.lease_id JOIN property p ON p.property_id=l.property_id
                        JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
                        WHERE {where.replace('l.', 'l.')} ORDER BY pay.payment_date DESC,pay.payment_id DESC LIMIT 300""", args)
         recent_payments = cur.fetchall()
     return render_template("payments.html", leases=leases, recent_payments=recent_payments,
-                           today=date.today().isoformat(), can_record=role in {"ADMIN", "TENANT_BUYER"})
+                           invoices=invoices,idempotency_key=str(uuid4()),today=date.today().isoformat(),
+                           can_record=role in {"ADMIN", "TENANT_BUYER"})
+
+
+@app.route("/invoices", methods=["GET", "POST"])
+@roles_required("ADMIN", "AGENT", "OWNER", "TENANT_BUYER")
+def invoices():
+    role, person_id = g.current_user["actor_role"], g.current_user["person_id"]
+    if request.method == "POST":
+        if role != "ADMIN": abort(403)
+        with db_cursor() as (_, cur):
+            call_procedure(cur, "CALL sp_generate_rental_invoices(%s)", (date.today(),))
+            call_procedure(cur, "CALL sp_refresh_notifications(%s)", (date.today(),))
+        flash("Rental invoices generated through today; balances and notices are refreshed.", "success")
+        return redirect(url_for("invoices"))
+
+    where, args = "1=1", []
+    if role == "AGENT": where, args = "l.agent_id=%s", [person_id]
+    elif role == "OWNER": where, args = "p.owner_id=%s", [person_id]
+    elif role == "TENANT_BUYER": where, args = "l.tenant_id=%s", [person_id]
+    with db_cursor() as (_, cur):
+        call_procedure(cur, "CALL sp_refresh_notifications(%s)", (date.today(),))
+        cur.execute(f"""SELECT b.invoice_id,b.lease_id,b.period_start,b.period_end,b.issue_date,b.due_date,
+                              b.amount_due,b.amount_paid,b.balance_due,b.invoice_status,
+                              p.property_id,p.title,tp.full_name AS tenant_name
+                       FROM v_invoice_balance b JOIN lease l ON l.lease_id=b.lease_id
+                       JOIN property p ON p.property_id=l.property_id
+                       JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
+                       WHERE {where} ORDER BY b.due_date DESC,b.invoice_id DESC LIMIT 1000""", args)
+        rows = cur.fetchall()
+    return render_template("invoices.html", invoices=rows, can_generate=role == "ADMIN")
+
+
+@app.route("/notifications")
+@roles_required("ADMIN", "AGENT", "OWNER", "TENANT_BUYER")
+def notifications():
+    with db_cursor() as (_, cur):
+        call_procedure(cur, "CALL sp_refresh_notifications(%s)", (date.today(),))
+        cur.execute("""SELECT notification_id,notification_type,title,message,is_read,created_at
+                       FROM notification WHERE account_id=%s
+                       ORDER BY is_read,created_at DESC,notification_id DESC LIMIT 300""",
+                    (g.current_user["account_id"],))
+        rows = cur.fetchall()
+    return render_template("notifications.html", notifications=rows)
+
+
+@app.post("/notifications/<int:notification_id>/read")
+@roles_required("ADMIN", "AGENT", "OWNER", "TENANT_BUYER")
+def mark_notification_read(notification_id):
+    with db_cursor() as (_, cur):
+        cur.execute("UPDATE notification SET is_read=TRUE WHERE notification_id=%s AND account_id=%s",
+                    (notification_id,g.current_user["account_id"]))
+    return redirect(url_for("notifications"))
+
+
+@app.route("/sales", methods=["GET", "POST"])
+@roles_required("ADMIN", "AGENT", "OWNER", "TENANT_BUYER")
+def sales():
+    role, person_id = g.current_user["actor_role"], g.current_user["person_id"]
+    if request.method == "POST":
+        if role not in {"ADMIN", "AGENT"}: abort(403)
+        try:
+            property_id = int(request.form["property_id"])
+            buyer_id = int(request.form["buyer_id"])
+            sale_price = Decimal(request.form["sale_price"])
+            if not sale_price.is_finite() or sale_price <= 0: raise ValueError("Sale price must be greater than zero.")
+            with db_cursor() as (_, cur):
+                cur.execute("""SELECT p.status,p.listing_type,p.agent_id,a.commission_rate
+                               FROM property p JOIN agent a ON a.person_id=p.agent_id
+                               WHERE p.property_id=%s FOR UPDATE""", (property_id,))
+                prop = cur.fetchone()
+                if not prop or prop["status"] != "AVAILABLE" or prop["listing_type"] != "FOR_SALE":
+                    raise ValueError("Choose an available property listed for sale.")
+                if role == "AGENT" and prop["agent_id"] != person_id:
+                    abort(403)
+                cur.execute("SELECT person_id FROM tenant WHERE person_id=%s", (buyer_id,))
+                if not cur.fetchone(): raise ValueError("Select an existing Buyer/Tenant profile.")
+                cur.execute("""INSERT INTO sale_transaction(property_id,buyer_id,agent_id,sale_price,
+                                                               commission_rate_at_sale,contract_date,status)
+                               VALUES(%s,%s,%s,%s,%s,CURRENT_DATE,'PENDING')""",
+                            (property_id,buyer_id,prop["agent_id"],sale_price,prop["commission_rate"]))
+            flash("Sale submitted for Admin review.", "success")
+        except (ValueError, KeyError, TypeError) as exc:
+            flash(str(exc), "error")
+        except pymysql.err.IntegrityError as exc:
+            if exc.args and exc.args[0] == 1062:
+                flash("This property already has a pending or approved sale.", "error")
+            else:
+                flash(f"Could not submit sale: {exc}", "error")
+        except Exception as exc:
+            flash(f"Could not submit sale: {exc}", "error")
+        return redirect(url_for("sales"))
+
+    where, args = "1=1", []
+    if role == "AGENT": where, args = "s.agent_id=%s", [person_id]
+    elif role == "OWNER": where, args = "p.owner_id=%s", [person_id]
+    elif role == "TENANT_BUYER": where, args = "s.buyer_id=%s", [person_id]
+    with db_cursor() as (_, cur):
+        cur.execute(f"""SELECT s.sale_id,s.property_id,s.sale_price,s.commission_rate_at_sale,s.commission_amount,
+                              s.contract_date,s.closing_date,s.status,s.agent_id,s.buyer_id,s.reviewed_at,
+                              p.title,b.full_name AS buyer_name,ap.full_name AS agent_name,ua.username AS reviewed_by
+                       FROM sale_transaction s JOIN property p ON p.property_id=s.property_id
+                       JOIN person b ON b.person_id=s.buyer_id
+                       JOIN agent a ON a.person_id=s.agent_id JOIN person ap ON ap.person_id=a.person_id
+                       LEFT JOIN user_account ua ON ua.account_id=s.reviewed_by_account_id
+                       WHERE {where} ORDER BY s.sale_id DESC LIMIT 500""", args)
+        rows = cur.fetchall()
+        available_properties, buyers = [], []
+        if role in {"ADMIN", "AGENT"}:
+            clause, pp = "status='AVAILABLE' AND listing_type='FOR_SALE'", []
+            if role == "AGENT": clause += " AND agent_id=%s"; pp.append(person_id)
+            cur.execute(f"SELECT property_id,title,asking_price FROM property WHERE {clause} ORDER BY title", pp)
+            available_properties = cur.fetchall()
+            cur.execute("SELECT t.person_id,p.full_name FROM tenant t JOIN person p USING(person_id) ORDER BY p.full_name LIMIT 1000")
+            buyers = cur.fetchall()
+    return render_template("sales.html", sales=rows, properties=available_properties, buyers=buyers,
+                           can_submit=role in {"ADMIN", "AGENT"}, can_review=role == "ADMIN")
+
+
+@app.post("/sales/<int:sale_id>/status")
+@roles_required("ADMIN")
+def update_sale_status(sale_id):
+    new_status = request.form.get("status")
+    if new_status not in {"APPROVED", "CLOSED", "REJECTED", "CANCELLED"}:
+        abort(400, description="Invalid sale status.")
+    try:
+        with db_cursor() as (_, cur):
+            if new_status in {"APPROVED", "REJECTED"}:
+                cur.execute("""UPDATE sale_transaction SET status=%s,reviewed_by_account_id=%s,reviewed_at=NOW()
+                               WHERE sale_id=%s AND status='PENDING'""",
+                            (new_status,g.current_user["account_id"],sale_id))
+            elif new_status == "CLOSED":
+                cur.execute("""UPDATE sale_transaction SET status='CLOSED',closing_date=CURRENT_DATE,
+                                   reviewed_by_account_id=%s,reviewed_at=NOW()
+                               WHERE sale_id=%s AND status='APPROVED'""",
+                            (g.current_user["account_id"],sale_id))
+            else:
+                cur.execute("""UPDATE sale_transaction SET status='CANCELLED',reviewed_by_account_id=%s,reviewed_at=NOW()
+                               WHERE sale_id=%s AND status IN ('PENDING','APPROVED')""",
+                            (g.current_user["account_id"],sale_id))
+            if cur.rowcount != 1: raise ValueError("The sale is not in a state that allows this action.")
+        flash("Sale status updated.", "success")
+    except Exception as exc:
+        flash(f"Could not update sale: {exc}", "error")
+    return redirect(url_for("sales"))
 
 
 @app.route("/maintenance", methods=["GET", "POST"])

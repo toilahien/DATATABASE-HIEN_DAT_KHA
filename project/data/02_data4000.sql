@@ -32,6 +32,11 @@ BEGIN
     DECLARE v_end DATE;
     DECLARE v_rent DECIMAL(15,2);
     DECLARE v_person_id BIGINT;
+    DECLARE v_payment_date DATE;
+    DECLARE v_sale_property_id BIGINT UNSIGNED;
+    DECLARE v_sale_agent_id BIGINT UNSIGNED;
+    DECLARE v_sale_price DECIMAL(15,2);
+    DECLARE v_commission_rate DECIMAL(5,2);
 
     -- 40 agents, 100 owners, 1,060 tenants = 1,200 people.
     SET i=1;
@@ -92,18 +97,41 @@ BEGIN
         SET i=i+1;
     END WHILE;
 
-    -- Two posted rent receipts for each lease preserve a simple financial history.
+    -- Create one invoice for each lease month up to today, including ended leases.
+    CALL sp_generate_rental_invoices(CURRENT_DATE);
+
+    -- Two posted receipts per lease. Each rent receipt is matched to its invoice
+    -- and has an idempotency key so a retried insert cannot create a duplicate.
     SET i=1;
     WHILE i<=600 DO
         SET v_lease_id=1+FLOOR((i-1)/2);
-        INSERT INTO payment(lease_id,payment_date,amount,payment_type,payment_method,reference_code,status)
-        SELECT l.lease_id,
-               CASE WHEN l.status='ACTIVE' AND i MOD 2=0 THEN CURRENT_DATE
+        SELECT CASE WHEN l.status='ACTIVE' AND i MOD 2=0 THEN CURRENT_DATE
                     WHEN i MOD 2=1 THEN DATE_ADD(l.start_date,INTERVAL 3 DAY)
-                    ELSE DATE_ADD(DATE_ADD(l.start_date,INTERVAL 1 MONTH),INTERVAL 3 DAY) END,
-               l.monthly_rent,'RENT',ELT(1+(i MOD 4),'BANK_TRANSFER','CASH','CARD','E_WALLET'),
-               CONCAT('DEMO-PAY-',LPAD(i,6,'0')),'POSTED'
-        FROM lease l WHERE l.lease_id=v_lease_id;
+                    ELSE DATE_ADD(DATE_ADD(l.start_date,INTERVAL 1 MONTH),INTERVAL 3 DAY) END
+        INTO v_payment_date FROM lease l WHERE l.lease_id=v_lease_id;
+        INSERT INTO payment(lease_id,invoice_id,payment_date,amount,payment_type,payment_method,reference_code,idempotency_key,status)
+        SELECT l.lease_id,ri.invoice_id,v_payment_date,l.monthly_rent,'RENT',
+               ELT(1+(i MOD 4),'BANK_TRANSFER','CASH','CARD','E_WALLET'),
+               CONCAT('DEMO-PAY-',LPAD(i,6,'0')),UUID(),'POSTED'
+        FROM lease l
+        LEFT JOIN rental_invoice ri ON ri.lease_id=l.lease_id
+          AND ri.period_start=GREATEST(STR_TO_DATE(CONCAT(YEAR(v_payment_date),'-',LPAD(MONTH(v_payment_date),2,'0'),'-01'),'%Y-%m-%d'),l.start_date)
+        WHERE l.lease_id=v_lease_id;
+        SET i=i+1;
+    END WHILE;
+
+    -- Ten completed sale transactions on properties 291..300; commission is
+    -- calculated and stored from the agent rate snapshot at closing.
+    SET i=1;
+    WHILE i<=10 DO
+        SELECT property_id,agent_id,asking_price INTO v_sale_property_id,v_sale_agent_id,v_sale_price
+        FROM property WHERE property_id=290+i;
+        SELECT commission_rate INTO v_commission_rate FROM agent WHERE person_id=v_sale_agent_id;
+        INSERT INTO sale_transaction(property_id,buyer_id,agent_id,sale_price,commission_rate_at_sale,
+                                     status,contract_date,closing_date)
+        VALUES(v_sale_property_id,141+((i-1) MOD 1060),v_sale_agent_id,
+               ROUND(v_sale_price*(0.94+(i MOD 5)*0.01),2),v_commission_rate,
+               'CLOSED',DATE_SUB(CURRENT_DATE,INTERVAL i DAY),DATE_SUB(CURRENT_DATE,INTERVAL i DAY));
         SET i=i+1;
     END WHILE;
 
@@ -132,5 +160,8 @@ UNION ALL SELECT 'tenant',COUNT(*) FROM tenant
 UNION ALL SELECT 'residential_property',COUNT(*) FROM residential_property
 UNION ALL SELECT 'commercial_property',COUNT(*) FROM commercial_property
 UNION ALL SELECT 'lease',COUNT(*) FROM lease
+UNION ALL SELECT 'rental_invoice',COUNT(*) FROM rental_invoice
 UNION ALL SELECT 'payment',COUNT(*) FROM payment
-UNION ALL SELECT 'maintenance_request',COUNT(*) FROM maintenance_request;
+UNION ALL SELECT 'sale_transaction',COUNT(*) FROM sale_transaction
+UNION ALL SELECT 'maintenance_request',COUNT(*) FROM maintenance_request
+UNION ALL SELECT 'notification',COUNT(*) FROM notification;

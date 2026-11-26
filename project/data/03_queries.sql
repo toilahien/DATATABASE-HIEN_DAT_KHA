@@ -65,22 +65,22 @@ JOIN maintenance_request m ON m.lease_id=l.lease_id AND m.status IN ('PENDING','
 JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
 ORDER BY m.report_date;
 
--- Q8. Active leases without a posted rent receipt.
-SELECT l.lease_id,l.property_id,l.tenant_id,l.monthly_rent
-FROM lease l
-WHERE l.status='ACTIVE'
-  AND NOT EXISTS (
-      SELECT 1 FROM payment pay
-      WHERE pay.lease_id=l.lease_id AND pay.payment_type='RENT' AND pay.status='POSTED'
-  )
-ORDER BY l.lease_id;
+-- Q8. Active leases with a current or overdue invoice balance.
+SELECT l.lease_id,l.property_id,l.tenant_id,l.monthly_rent,
+       COUNT(b.invoice_id) AS unpaid_invoice_count,SUM(b.balance_due) AS balance_due
+FROM lease l JOIN v_invoice_balance b ON b.lease_id=l.lease_id
+WHERE l.status='ACTIVE' AND b.invoice_status IN ('DUE','PARTIALLY_PAID','OVERDUE')
+GROUP BY l.lease_id,l.property_id,l.tenant_id,l.monthly_rent
+ORDER BY balance_due DESC,l.lease_id;
 
 -- Q9. Monthly net cash flow for the last 12 months.
 SELECT DATE_FORMAT(payment_date,'%Y-%m') AS month,
        SUM(CASE WHEN payment_type='REFUND' THEN -amount ELSE amount END) AS net_cash_received,
        COUNT(*) AS payment_count
 FROM payment
-WHERE status='POSTED' AND payment_date >= DATE_SUB(CURRENT_DATE,INTERVAL 12 MONTH)
+WHERE status='POSTED'
+  AND payment_date >= DATE_SUB(CURRENT_DATE,INTERVAL 12 MONTH)
+  AND payment_date <= CURRENT_DATE
 GROUP BY DATE_FORMAT(payment_date,'%Y-%m')
 ORDER BY month;
 
@@ -136,3 +136,52 @@ FROM agent a JOIN person pe ON pe.person_id=a.person_id
 LEFT JOIN property p ON p.agent_id=a.person_id AND p.listing_type='FOR_SALE' AND p.status='AVAILABLE'
 GROUP BY a.person_id,pe.full_name
 ORDER BY total_asking_value DESC;
+
+-- Q15. Closed sale transactions and commission amounts frozen at the sale's agent rate.
+SELECT s.sale_id,s.property_id,p.title,b.full_name AS buyer_name,ap.full_name AS agent_name,
+       s.sale_price,s.commission_rate_at_sale,s.commission_amount,s.closing_date
+FROM sale_transaction s
+JOIN property p ON p.property_id=s.property_id
+JOIN person b ON b.person_id=s.buyer_id
+JOIN agent a ON a.person_id=s.agent_id JOIN person ap ON ap.person_id=a.person_id
+WHERE s.status='CLOSED'
+ORDER BY s.closing_date DESC,s.sale_id DESC;
+
+-- Q16. Rental invoices with outstanding balances, including overdue status.
+SELECT b.invoice_id,b.lease_id,b.period_start,b.period_end,b.due_date,
+       b.amount_due,b.amount_paid,b.balance_due,b.invoice_status,
+       p.property_id,p.title,tp.full_name AS tenant_name
+FROM v_invoice_balance b
+JOIN lease l ON l.lease_id=b.lease_id
+JOIN property p ON p.property_id=l.property_id
+JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
+WHERE b.invoice_status IN ('DUE','PARTIALLY_PAID','OVERDUE')
+ORDER BY b.due_date,b.invoice_id;
+
+-- Q17. Agent commission totals from completed sales only.
+SELECT a.person_id,pe.full_name,a.commission_rate,
+       COUNT(s.sale_id) AS closed_sales,
+       COALESCE(SUM(s.sale_price),0) AS closed_sales_value,
+       COALESCE(SUM(s.commission_amount),0) AS earned_commission
+FROM agent a JOIN person pe ON pe.person_id=a.person_id
+LEFT JOIN sale_transaction s ON s.agent_id=a.person_id AND s.status='CLOSED'
+GROUP BY a.person_id,pe.full_name,a.commission_rate
+ORDER BY earned_commission DESC,closed_sales_value DESC;
+
+-- Q18. Recent in-app notifications for the current user's account; replace 1 with account_id.
+SELECT notification_id,notification_type,title,message,is_read,created_at
+FROM notification
+WHERE account_id=1
+ORDER BY created_at DESC,notification_id DESC
+LIMIT 100;
+
+-- Q19. Review possible exact duplicate posted payments before manual cleanup.
+-- Same amount/date can be legitimate installments, so this is an audit report,
+-- not an instruction to delete rows automatically.
+SELECT lease_id,invoice_id,payment_date,amount,payment_type,payment_method,reference_code,
+       COUNT(*) AS duplicate_count,GROUP_CONCAT(payment_id ORDER BY payment_id) AS payment_ids
+FROM payment
+WHERE status='POSTED'
+GROUP BY lease_id,invoice_id,payment_date,amount,payment_type,payment_method,reference_code
+HAVING COUNT(*)>1
+ORDER BY duplicate_count DESC,payment_date DESC;
