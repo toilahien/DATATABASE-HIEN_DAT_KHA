@@ -235,6 +235,9 @@ def accounts():
                         if not cur.fetchone():
                             raise ValueError("The selected person does not match the chosen role.")
                     else:
+                        cur.execute("SELECT person_id FROM tenant WHERE person_id=%s", (person_id,))
+                        if not cur.fetchone():
+                            raise ValueError("The selected person does not have a Tenant/Buyer profile.")
                         cur.execute("SELECT person_id FROM owner WHERE person_id=%s UNION SELECT person_id FROM agent WHERE person_id=%s",
                                     (person_id, person_id))
                         if cur.fetchone():
@@ -264,6 +267,7 @@ def accounts():
                        LEFT JOIN tenant t ON t.person_id=p.person_id
                        LEFT JOIN user_account ua ON ua.person_id=p.person_id
                        WHERE ua.account_id IS NULL
+                         AND (a.person_id IS NOT NULL OR o.person_id IS NOT NULL OR t.person_id IS NOT NULL)
                        ORDER BY p.full_name LIMIT 1000""")
         people = cur.fetchall()
     return render_template("accounts.html", accounts=rows, people=people)
@@ -426,7 +430,7 @@ def update_listing(property_id):
             cur.execute(sql, args)
             if not cur.fetchone():
                 abort(404, description="Available property not found in your scope.")
-            cur.execute("UPDATE property SET listing_type=%s,asking_price=%s WHERE property_id=%s", (listing,price,property_id))
+            call_procedure(cur, "CALL sp_update_property_listing(%s,%s,%s)", (property_id,listing,price))
         flash("Listing updated.", "success")
     except (ValueError, TypeError) as exc:
         flash(str(exc), "error")
@@ -443,7 +447,7 @@ def assign_agent(property_id):
             if not cur.fetchone(): raise ValueError("Select an existing Agent profile.")
             cur.execute("SELECT property_id FROM property WHERE property_id=%s", (property_id,))
             if not cur.fetchone(): abort(404)
-            cur.execute("UPDATE property SET agent_id=%s WHERE property_id=%s", (agent_id,property_id))
+            call_procedure(cur, "CALL sp_reassign_property_agent(%s,%s)", (property_id,agent_id))
         flash("Agent assignment updated.", "success")
     except (ValueError, KeyError, TypeError) as exc:
         flash(str(exc), "error")
@@ -554,11 +558,16 @@ def payments():
             if invoice_id is not None and payment_type not in {"RENT", "REFUND"}:
                 raise ValueError("Only rent payments or refunds can be linked to an invoice.")
             with db_cursor() as (_, cur):
-                query = "SELECT lease_id FROM lease WHERE lease_id=%s"
+                query = "SELECT lease_id,deposit_amount,deposit_paid FROM lease WHERE lease_id=%s"
                 args = [lease_id]
                 if role == "TENANT_BUYER": query += " AND tenant_id=%s"; args.append(person_id)
                 cur.execute(query + " FOR UPDATE", args)
-                if not cur.fetchone(): raise ValueError("The selected lease was not found for this account.")
+                lease_row = cur.fetchone()
+                if not lease_row: raise ValueError("The selected lease was not found for this account.")
+                if payment_type == "DEPOSIT" and amount > lease_row["deposit_amount"] - lease_row["deposit_paid"]:
+                    raise ValueError("Payment exceeds the remaining deposit due under this lease.")
+                if payment_type == "REFUND" and invoice_id is None and amount > lease_row["deposit_paid"]:
+                    raise ValueError("Deposit refund exceeds the amount currently held.")
                 invoice_paid = 0
                 if invoice_id is not None:
                     cur.execute("""SELECT amount_due,status FROM rental_invoice
@@ -607,7 +616,7 @@ def payments():
                        JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
                        WHERE {where} ORDER BY (l.status='ACTIVE') DESC,l.lease_id DESC LIMIT 500""", args)
         leases = cur.fetchall()
-        invoice_where, invoice_args = "b.balance_due>0 AND b.status='ISSUED'", []
+        invoice_where, invoice_args = "b.status='ISSUED' AND (b.balance_due>0 OR b.amount_paid>0)", []
         if role == "TENANT_BUYER": invoice_where += " AND l.tenant_id=%s"; invoice_args.append(person_id)
         elif role == "OWNER": invoice_where += " AND p.owner_id=%s"; invoice_args.append(person_id)
         cur.execute(f"""SELECT b.invoice_id,b.lease_id,b.period_start,b.period_end,b.due_date,
@@ -615,7 +624,7 @@ def payments():
                        FROM v_invoice_balance b JOIN lease l ON l.lease_id=b.lease_id
                        JOIN property p ON p.property_id=l.property_id
                        JOIN tenant t ON t.person_id=l.tenant_id JOIN person tp ON tp.person_id=t.person_id
-                       WHERE {invoice_where} ORDER BY b.due_date,b.invoice_id LIMIT 500""", invoice_args)
+                       WHERE {invoice_where} ORDER BY b.due_date DESC,b.invoice_id DESC LIMIT 500""", invoice_args)
         invoices = cur.fetchall()
         cur.execute(f"""SELECT pay.payment_id,pay.payment_date,pay.amount,pay.payment_type,pay.payment_method,
                               pay.status,pay.lease_id,pay.invoice_id,pay.reference_code,p.title,tp.full_name AS tenant_name
@@ -829,8 +838,11 @@ def update_maintenance_status(request_id):
         abort(400, description="Invalid maintenance status.")
     try:
         with db_cursor() as (_, cur):
-            cur.execute("UPDATE maintenance_request SET status=%s,resolved_at=IF(%s='COMPLETED',NOW(),NULL) WHERE request_id=%s",
-                        (new_status,new_status,request_id))
+            cur.execute("""UPDATE maintenance_request
+                           SET status=%s,resolved_at=IF(%s='COMPLETED',NOW(),NULL),
+                               reviewed_by_account_id=%s,reviewed_at=NOW()
+                           WHERE request_id=%s""",
+                        (new_status,new_status,g.current_user["account_id"],request_id))
             if cur.rowcount != 1: raise ValueError("Maintenance request not found.")
         flash("Maintenance request updated.", "success")
     except Exception as exc:

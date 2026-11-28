@@ -1,5 +1,5 @@
 -- Deterministic synthetic demo data with Vietnamese-style personal names; creates at least 4,000 rows.
--- Run after 01_schema.sql. Safe to re-run because the schema script recreates tables.
+-- Run once after schema objects are installed and an active Admin account has been created in the UI.
 USE reims_db;
 DELIMITER $$
 DROP PROCEDURE IF EXISTS seed_reims_demo$$
@@ -28,6 +28,7 @@ BEGIN
     DECLARE v_type VARCHAR(20);
     DECLARE v_property_id BIGINT;
     DECLARE v_lease_id BIGINT;
+    DECLARE v_invoice_id BIGINT UNSIGNED;
     DECLARE v_start DATE;
     DECLARE v_end DATE;
     DECLARE v_rent DECIMAL(15,2);
@@ -37,6 +38,16 @@ BEGIN
     DECLARE v_sale_agent_id BIGINT UNSIGNED;
     DECLARE v_sale_price DECIMAL(15,2);
     DECLARE v_commission_rate DECIMAL(5,2);
+    DECLARE v_reviewer_account_id BIGINT UNSIGNED;
+
+    SET v_reviewer_account_id = (
+        SELECT MIN(account_id) FROM user_account
+        WHERE actor_role='ADMIN' AND is_active=TRUE
+    );
+    IF v_reviewer_account_id IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Create and activate an Admin account in the UI before loading demo data';
+    END IF;
 
     -- 40 agents, 100 owners, 1,060 tenants = 1,200 people.
     SET i=1;
@@ -93,9 +104,18 @@ BEGIN
         SET v_end=IF(i<=150,DATE_ADD(v_start,INTERVAL 1 YEAR),DATE_ADD(v_start,INTERVAL 3 YEAR));
         SET v_rent=8000000+(v_property_id MOD 15)*1000000;
         INSERT INTO lease(lease_id,start_date,end_date,monthly_rent,deposit_amount,payment_day,status,property_id,tenant_id,agent_id)
-        VALUES(i,v_start,v_end,v_rent,v_rent,5+(i MOD 20),IF(i<=150,'TERMINATED','ACTIVE'),v_property_id,141+((i-1) MOD 1060),1+((v_property_id-1) MOD 40));
+        VALUES(i,v_start,v_end,v_rent,v_rent,5+(i MOD 20),'PENDING',v_property_id,141+((i-1) MOD 1060),1+((v_property_id-1) MOD 40));
         SET i=i+1;
     END WHILE;
+
+    -- Simulate reviewed historical leases through the same approved lifecycle as the UI.
+    UPDATE lease
+    SET status='ACTIVE',reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE lease_id BETWEEN 1 AND 150 AND status='PENDING';
+    UPDATE lease SET status='TERMINATED' WHERE lease_id BETWEEN 1 AND 150 AND status='ACTIVE';
+    UPDATE lease
+    SET status='ACTIVE',reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE lease_id BETWEEN 151 AND 300 AND status='PENDING';
 
     -- Create one invoice for each lease month up to today, including ended leases.
     CALL sp_generate_rental_invoices(CURRENT_DATE);
@@ -109,14 +129,16 @@ BEGIN
                     WHEN i MOD 2=1 THEN DATE_ADD(l.start_date,INTERVAL 3 DAY)
                     ELSE DATE_ADD(DATE_ADD(l.start_date,INTERVAL 1 MONTH),INTERVAL 3 DAY) END
         INTO v_payment_date FROM lease l WHERE l.lease_id=v_lease_id;
-        INSERT INTO payment(lease_id,invoice_id,payment_date,amount,payment_type,payment_method,reference_code,idempotency_key,status)
-        SELECT l.lease_id,ri.invoice_id,v_payment_date,l.monthly_rent,'RENT',
-               ELT(1+(i MOD 4),'BANK_TRANSFER','CASH','CARD','E_WALLET'),
-               CONCAT('DEMO-PAY-',LPAD(i,6,'0')),UUID(),'POSTED'
-        FROM lease l
-        LEFT JOIN rental_invoice ri ON ri.lease_id=l.lease_id
+        SELECT ri.invoice_id INTO v_invoice_id
+        FROM rental_invoice ri JOIN lease l ON l.lease_id=ri.lease_id
+        WHERE ri.lease_id=v_lease_id
           AND ri.period_start=GREATEST(STR_TO_DATE(CONCAT(YEAR(v_payment_date),'-',LPAD(MONTH(v_payment_date),2,'0'),'-01'),'%Y-%m-%d'),l.start_date)
-        WHERE l.lease_id=v_lease_id;
+        LIMIT 1;
+        SELECT monthly_rent INTO v_rent FROM lease WHERE lease_id=v_lease_id;
+        INSERT INTO payment(lease_id,invoice_id,payment_date,amount,payment_type,payment_method,reference_code,idempotency_key,status)
+        VALUES(v_lease_id,v_invoice_id,v_payment_date,v_rent,'RENT',
+               ELT(1+(i MOD 4),'BANK_TRANSFER','CASH','CARD','E_WALLET'),
+               CONCAT('DEMO-PAY-',LPAD(i,6,'0')),UUID(),'POSTED');
         SET i=i+1;
     END WHILE;
 
@@ -128,22 +150,39 @@ BEGIN
         FROM property WHERE property_id=290+i;
         SELECT commission_rate INTO v_commission_rate FROM agent WHERE person_id=v_sale_agent_id;
         INSERT INTO sale_transaction(property_id,buyer_id,agent_id,sale_price,commission_rate_at_sale,
-                                     status,contract_date,closing_date)
+                                     status,contract_date)
         VALUES(v_sale_property_id,141+((i-1) MOD 1060),v_sale_agent_id,
                ROUND(v_sale_price*(0.94+(i MOD 5)*0.01),2),v_commission_rate,
-               'CLOSED',DATE_SUB(CURRENT_DATE,INTERVAL i DAY),DATE_SUB(CURRENT_DATE,INTERVAL i DAY));
+               'PENDING',DATE_SUB(CURRENT_DATE,INTERVAL i DAY));
         SET i=i+1;
     END WHILE;
+    UPDATE sale_transaction
+    SET status='APPROVED',reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE status='PENDING' AND property_id BETWEEN 291 AND 300;
+    UPDATE sale_transaction
+    SET status='CLOSED',closing_date=contract_date,reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE status='APPROVED' AND property_id BETWEEN 291 AND 300;
 
-    -- 100 repair requests tied to current leases; first ten are in progress.
+    -- 100 repair requests tied to current leases; first ten remain in progress.
     SET i=1;
     WHILE i<=100 DO
         INSERT INTO maintenance_request(lease_id,description,report_date,estimated_cost,actual_cost,status,resolved_at)
         VALUES(150+i,ELT(1+(i MOD 5),'Water leak inspection','Air conditioner repair','Electrical socket repair','Door lock replacement','Paint and wall repair'),
                DATE_ADD('2026-01-01',INTERVAL i DAY),500000+(i MOD 10)*150000,
-               IF(i<=10,NULL,500000+(i MOD 10)*130000),IF(i<=10,'IN_PROGRESS','COMPLETED'),IF(i<=10,NULL,DATE_ADD('2026-01-02',INTERVAL i DAY)));
+               NULL,'PENDING',NULL);
         SET i=i+1;
     END WHILE;
+    UPDATE maintenance_request
+    SET status='IN_PROGRESS',reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE request_id BETWEEN 1 AND 10 AND status='PENDING';
+    UPDATE maintenance_request
+    SET status='IN_PROGRESS',reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE request_id BETWEEN 11 AND 100 AND status='PENDING';
+    UPDATE maintenance_request
+    SET status='COMPLETED',actual_cost=500000+(request_id MOD 10)*130000,
+        resolved_at=DATE_ADD('2026-01-02',INTERVAL request_id DAY),
+        reviewed_by_account_id=v_reviewer_account_id,reviewed_at=NOW()
+    WHERE request_id BETWEEN 11 AND 100 AND status='IN_PROGRESS';
 
 END$$
 CALL seed_reims_demo()$$

@@ -24,6 +24,8 @@
 
 **REIMS** is designed to provide centralized management for real estate brokerages and property management agencies that currently rely on manual records or disconnected spreadsheets. The system digitizes property inventory, customer relationships, viewings, lease contracts, rental payments, and maintenance requests into a single, consistent relational database.
 
+The requirements in this README describe the project brief. For the current implementation status and instructions for setting up the SQL database and Flask UI, see [`project/README_VI.md`](project/README_VI.md).
+
 ## Team
 
 | Field | Detail |
@@ -188,6 +190,8 @@ Designed following **ISO/IEC 19505 (UML)** and **Information Engineering (IE)** 
 
 ### Conceptual Model (EER Diagram)
 
+![REIMS EER diagram](report/EER.png)
+
 ### Entity Overview
 
 | # | Entity | Primary Key | Description |
@@ -230,10 +234,13 @@ All 12 relations are verified against **1NF, 2NF, 3NF, and BCNF**. Every relatio
 
 ```
 .
-├── DB_Project_Report.docx
-├── EER Diagram.png
-│                                                   
-└── README.md                  # Full report: scope, requirements, business rules,
+├── README.md
+├── project/
+│   ├── README_VI.md            # Implemented features and setup
+│   ├── sql/                    # Modular schema, triggers, views, procedures, seed, queries
+│   └── ui/                     # Flask UI and Linux/macOS/Windows launch scripts
+└── report/
+    └── EER.png                 # EER diagram
 ```
 
 ## Standards Referenced

@@ -1,6 +1,6 @@
 # Chạy giao diện web REIMS
 
-Giao diện Flask kết nối đến MySQL Server. Database mới: chạy `01_schema.sql`, sau đó `02_data4000.sql`. Database đã có dữ liệu: giữ nguyên database và chạy migration còn thiếu `05_auth_migration.sql` (nếu chưa có tài khoản) rồi `06_finance_migration.sql`.
+Giao diện Flask kết nối đến MySQL Server. Trước khi chạy UI, khởi tạo `reims_db` theo thứ tự trong [`../sql/README_VI.md`](../sql/README_VI.md). Sau khi tạo Admin đầu tiên qua `/setup`, có thể nạp dữ liệu demo bằng `sql/seed/01_data4000.sql`.
 
 ## Khởi động nhanh
 
@@ -15,18 +15,13 @@ Mở <http://127.0.0.1:5000>. MySQL Server phải đang chạy.
 
 Nếu database chưa có tài khoản Admin, web sẽ hiện trang tạo Admin đầu tiên. Sau khi đăng nhập, vào **Accounts** để tạo login cho Agent, Owner, Tenant hoặc Buyer. Mỗi account được gắn với hồ sơ đúng vai trò; mật khẩu được lưu dưới dạng hash, bắt buộc nhập và tối đa 128 ký tự. Admin có thể vô hiệu hóa account.
 
-Quyền được xác thực ở server trên mỗi request. Admin quản lý toàn hệ thống; Agent chỉ sửa tin đăng và chuẩn bị lease cho bất động sản được giao; Owner chỉ xem dữ liệu thuộc bất động sản của mình; Tenant/Buyer chỉ xem dữ liệu cá nhân và tạo yêu cầu lease, payment hoặc bảo trì trong phạm vi lease của họ. Chỉ Admin được duyệt/từ chối lease, phân công Agent và cập nhật tiến độ bảo trì.
-
 ## Chức năng hiện có
 
-- Xem dashboard theo phạm vi actor.
-- Tìm kiếm bất động sản theo quyền; Admin tạo tài sản và phân công Agent.
-- Agent cập nhật giá/loại tin đăng của tài sản được giao.
-- Tạo lease ở trạng thái PENDING; Admin duyệt hoặc từ chối.
-- Tạo hóa đơn thuê theo tháng, theo dõi khoản đã thu, số dư, khoản đến hạn/quá hạn.
-- Ghi payment gắn invoice; kiểm tra số dư, transaction reference, idempotency key và khoản gửi trùng.
-- Gửi offer giao dịch bán, Admin duyệt/chốt, lưu hoa hồng theo tỷ lệ tại thời điểm giao dịch.
-- Xem thông báo hóa đơn, lease sắp/đã hết hạn và cập nhật giao dịch bán; lease quá ngày kết thúc được tự chuyển sang `EXPIRED` khi thông báo được làm mới.
-- Tạo yêu cầu bảo trì; Admin cập nhật tiến độ.
+- Dashboard theo phạm vi actor; quản lý tài sản và phân công Agent.
+- Tạo lease PENDING và để Admin duyệt hoặc từ chối.
+- Tạo hóa đơn thuê theo tháng, xem công nợ và ghi nhận thanh toán.
+- Gửi offer bán, Admin duyệt/chốt và lưu hoa hồng theo tỷ lệ tại thời điểm giao dịch.
+- Thông báo về hóa đơn, lease và giao dịch bán.
+- Tạo yêu cầu bảo trì và để Admin cập nhật tiến độ.
 
-Thông báo được làm mới khi mở trang Invoices hoặc Notifications. Hóa đơn demo dùng tháng lịch và chưa tính tiền prorate cho tháng lẻ.
+Hóa đơn và thông báo được làm mới khi trang liên quan được mở hoặc Admin tạo hóa đơn; chưa có MySQL Event chạy nền. Hóa đơn demo dùng tháng lịch và chưa tính tiền prorate cho tháng lẻ.

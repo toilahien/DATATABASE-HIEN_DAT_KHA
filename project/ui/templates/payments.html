@@ -4,7 +4,7 @@
 <form method="post" class="form-grid" id="payment-form">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 <label>Lease<select name="lease_id" id="payment-lease" required><option value="">Select a lease</option>{% for l in leases %}<option value="{{l.lease_id}}">#{{l.lease_id}} · {{l.title}} · {{l.tenant_name}} · {{l.status|replace('_',' ')|title}}</option>{% endfor %}</select></label>
-<label>Invoice<select name="invoice_id" id="payment-invoice"><option value="">Select an invoice for rent payment</option>{% for i in invoices %}<option value="{{i.invoice_id}}" data-lease-id="{{i.lease_id}}">#{{i.invoice_id}} · Lease #{{i.lease_id}} · due {{i.due_date}} · balance {{i.balance_due|money}}</option>{% endfor %}</select></label>
+<label>Invoice<select name="invoice_id" id="payment-invoice"><option value="">Select an invoice for rent payment or rent refund</option>{% for i in invoices %}<option value="{{i.invoice_id}}" data-lease-id="{{i.lease_id}}">#{{i.invoice_id}} · Lease #{{i.lease_id}} · due {{i.due_date}} · balance {{i.balance_due|money}} · paid {{i.amount_paid|money}}</option>{% endfor %}</select></label>
 <label>Payment type<select name="payment_type" id="payment-type" required><option value="RENT">Rent</option><option value="DEPOSIT">Deposit</option><option value="FEE">Fee</option><option value="REFUND">Refund</option></select></label>
 <label>Amount (VND)<input type="number" name="amount" min="1" step="1" required></label>
 <label>Payment date<input type="date" name="payment_date" value="{{ today }}" max="{{ today }}" required></label>
@@ -24,6 +24,8 @@ function filterInvoices(){
     option.disabled=option.hidden;
   });
   if(invoiceSelect.selectedOptions[0]?.hidden)invoiceSelect.value='';
+  invoiceSelect.disabled=!['RENT','REFUND'].includes(typeSelect.value);
+  if(invoiceSelect.disabled)invoiceSelect.value='';
   invoiceSelect.required=typeSelect.value==='RENT';
 }
 leaseSelect?.addEventListener('change',filterInvoices);

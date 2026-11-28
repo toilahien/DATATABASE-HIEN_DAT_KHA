@@ -1,0 +1,20 @@
+-- Run all demonstration queries (mysql command-line client only; SOURCE is not a Workbench statement).
+SOURCE sql/queries/property/q01.sql;
+SOURCE sql/queries/property/q02.sql;
+SOURCE sql/queries/property/q10.sql;
+SOURCE sql/queries/property/q14.sql;
+SOURCE sql/queries/people/q05.sql;
+SOURCE sql/queries/people/q06.sql;
+SOURCE sql/queries/people/q11.sql;
+SOURCE sql/queries/leases/q07.sql;
+SOURCE sql/queries/leases/q08.sql;
+SOURCE sql/queries/finance/q03.sql;
+SOURCE sql/queries/finance/q04.sql;
+SOURCE sql/queries/finance/q09.sql;
+SOURCE sql/queries/finance/q12.sql;
+SOURCE sql/queries/finance/q13.sql;
+SOURCE sql/queries/finance/q16.sql;
+SOURCE sql/queries/finance/q19.sql;
+SOURCE sql/queries/sales/q15.sql;
+SOURCE sql/queries/sales/q17.sql;
+SOURCE sql/queries/notifications/q18.sql;
